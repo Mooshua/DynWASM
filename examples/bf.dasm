@@ -1,1 +1,9 @@
-.gitkeep but lazier :))))
+
+|.import $fd_write "wasi_unstable" "fd_write" 
+
+|.data $str "hello, world"; define a string in our memory
+
+|.func $main (unpack(args)) (i32, i64)
+|   i32.const 1
+|.end
+|.export $main "_start"

@@ -10,6 +10,7 @@ local _I64 = ffi.typeof("int64_t")
 local _U64 = ffi.typeof("uint64_t")
 local _F32 = ffi.typeof("float")
 local _F64 = ffi.typeof("double")
+local _VEC = "vec"
 
 local Binary = 
 {
@@ -69,14 +70,20 @@ local Binary =
         --  Control instructions
         Unreachable = 0x00;
         Nop = 0x01;
-        Block = 0x02;
-        Loop = 0x03;
-        If = 0x04;
-        Else = 0x05;
 
-        Br = 0x0C;
-        Br_If = 0x0D;
-        Br_Table = 0x0E;
+        --  No clue what the standard wants me to do here
+        --  "s33 (sic), byte, or 0x40"
+        --  So i'll leave it as an s32; LEB128 will handle varying lengths.
+        --  TODO: is s32 == blocktype a valid assumption?
+        Block = { 0x02, i32 };
+        Loop = { 0x03, i32 };
+        If = { 0x04, i32 };
+        Else = { 0x05, i32 };
+
+        --  Labelidx, always u32
+        Br = { 0x0C, u32 };
+        Br_If = { 0x0D };
+        Br_Table = { 0x0E, u32 };
 
         Return = 0x0F;
 
@@ -318,8 +325,26 @@ local Binary =
 
     Alias = 
     {
-    }
+    };
 
+    
+
+}
+
+local Const = {
+    i32 = Binary.Numbers.i32;
+    i64 = Binary.Numbers.i64;
+    f32 = Binary.Numbers.f32;
+    f64 = Binary.Numbers.f64;
+    v128 = Binary.Vector.v128;
+    funcref = Binary.Ref.Func;
+    externref = Binary.Ref.Extern;
+    functype = Binary.Function;
+    limit_min = Binary.Limits.Min;
+    limit_minmax = Binary.Limits.MinMax;
+    const = Binary.Global.Const;
+    mut = Binary.Global.Mutate;
+    empty = 0x40;
 }
 
 local Encode = {}
@@ -448,18 +473,57 @@ function Encode.New()
     return setmetatable(o, Encode)
 end
 
+local function do_vec(lang, vec)
+    local a = string.gsub(lang.Vector, "<%-values%->", vec)
+    return a 
+end
 
-local function Compile(text)
+local function do_vararg_vec(lang, ...)
+    local v = {...}
+    return do_vec(lang, table.concat(v, lang.ArgSeparator))
+end
+
+local function Compile(text, lang)
 
     text = text .. "\n"
 
-    --  1.  GMATCH over piped lines to generate
-    for line in text:gmatch("%s*|(%C*)[\n]") do
-        print ('h',line)
-    end
+    --  1.  GSUB over piped lines to generate output
+    local emitted = text:gsub("(%s*)|(%C*)\n", function(spc, line)
 
+        --  1. What's our directive (assembly/macro)
+        --  2. Are we a macro?
+        local isMacro, directive,drest = line:match("%s*(.?)([%w%._%-]+)(.+)")
+        isMacro = isMacro == "."
+
+        --  3. Convert vectors to tables
+        drest = drest:gsub("%s+(%b())", function(vec)
+            return do_vec(lang, string.sub(vec, 2, -2))
+        end)
+
+        --  Strings are just vectors, right?
+        drest = drest:gsub('(%b"")', function(chars)
+            chars = string.sub(chars, 2, -2)
+            local str = utf8.toutf8(chars)
+            local str2table = {}
+            for i = 1, #str do
+                table.insert(str2table, string.byte(string.sub(str, i, i)))
+            end
+            local l = #str
+            return do_vararg_vec(lang, l, unpack(str2table))
+        end)
+
+        --  4. If macro, use language pack
+
+        print(drest)
+        
+
+        return string.format("%s%s\n", spc, out)
+
+    end)
+
+    print(emitted)
 
 
 end
 
-Compile(io.open("examples/bf.dasm"):read("*a"))
+Compile(io.open("examples/bf.dasm"):read("*a"), require("src/compiler/lua"))
